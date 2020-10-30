@@ -100,7 +100,7 @@ def write_sound(input_filename, output_filename, filter, cutoff_frequency, durat
     err = cs.compileCsd("./{}.csd".format(filter)) #try with saw2.csd for a sawtooth wave
     cs.setMessageLevel(4)
     cs.setOption("-o{}".format(output_filename))
-    print(input_filename)
+    print(output_filename)
     cs.setStringChannel('filename', input_filename)
     cs.setControlChannel('cutoff', cutoff_frequency)
 
