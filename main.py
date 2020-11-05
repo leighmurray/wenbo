@@ -5,10 +5,14 @@ import matplotlib.pyplot as plt
 import matplotlib.style as ms
 import os
 import pandas as pd
+import concurrent.futures
+
 ms.use('seaborn-whitegrid')
 
 input_file_dir = './input/'
 output_file_dir = "./output/"
+
+number_of_threads = 24
 
 def get_bandwidth(sample_data):
     return np.mean(librosa.feature.spectral_bandwidth(sample_data))
@@ -26,17 +30,27 @@ def get_unique_labels_pandas(database: pd.DataFrame):
     return unique_labels
 
 
+def analysis_thread(filename):
+    global bandwidth
+    global rolloff
+    current_sample = get_mono_resampled_audio(filename)
+    print("Generating bandwidth for: {}...".format(filename))
+    bandwidth.append(get_bandwidth(current_sample))
+    print("Generating rolloff for: {}...".format(filename))
+    rolloff.append(get_rolloff(current_sample))
+    print("Done")
+
+
 def set_metadata_pandas(database: pd.DataFrame):
+    global bandwidth
+    global rolloff
+    global number_of_threads
     bandwidth = []
     rolloff = []
+    filenames = list(database['filename'])
 
-    for i, row in database.iterrows():
-        current_sample = get_mono_resampled_audio(row["filename"])
-        print("Generating bandwidth for: {}...".format(row["filename"]))
-        bandwidth.append(get_bandwidth(current_sample))
-        print("Generating rolloff for: {}...".format(row["filename"]))
-        rolloff.append(get_rolloff(current_sample))
-        print("Done")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_threads) as executor:
+        executor.map(analysis_thread, filenames)
 
     database['bandwidth'] = bandwidth
     database['rolloff'] = rolloff
@@ -116,11 +130,18 @@ def generate_output_filename(current_filter, current_frequency, current_filename
 def generate_soundfiles(input_filenames, filters, cutoff_frequencies):
     global input_file_dir
     global output_file_dir
+    global number_of_threads
 
     if not os.path.exists(output_file_dir):
         os.makedirs(output_file_dir)
 
     dataframe = pd.DataFrame()
+
+    thread_input_filenames = []
+    thread_output_filenames = []
+    thread_current_filters = []
+    thread_current_frequencies = []
+    thread_durations = []
 
     for current_filename in input_filenames:
         for current_filter in filters:
@@ -128,12 +149,20 @@ def generate_soundfiles(input_filenames, filters, cutoff_frequencies):
                 input_filename = "{}{}".format(input_file_dir, current_filename)
                 output_filename = generate_output_filename(current_filter, current_frequency, current_filename)
                 duration = librosa.get_duration(filename=input_filename)
-                write_sound(input_filename, output_file_dir + output_filename, current_filter, current_frequency, duration)
+                thread_input_filenames.append(input_filename)
+                thread_output_filenames.append(output_file_dir + output_filename)
+                thread_current_filters.append(current_filter)
+                thread_current_frequencies.append(current_frequency)
+                thread_durations.append(duration)
+                # write_sound(input_filename, output_file_dir + output_filename, current_filter, current_frequency, duration)
                 dataframe = dataframe.append({
                     'filename': output_filename,
                     'filter': current_filter,
                     'frequency': current_frequency,
                 }, ignore_index=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_threads) as executor:
+        executor.map(write_sound, thread_input_filenames, thread_output_filenames, thread_current_filters, thread_current_frequencies, thread_durations)
 
     return dataframe
 
